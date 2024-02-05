@@ -11,6 +11,9 @@ from keras.preprocessing import image
 from keras_preprocessing.image import ImageDataGenerator
 import tensorflow as tf
 from keras.models import Sequential
+from tensorflow.keras import regularizers
+import tensorflow_hub as hub
+from tensorflow.keras.layers import concatenate
 from tensorflow.keras.layers import (Dense, Dropout, Flatten, Conv2D, MaxPool2D, BatchNormalization, MaxPooling2D,
                                      BatchNormalization, Permute, TimeDistributed, GlobalAveragePooling2D,
                                      SeparableConv2D, ZeroPadding2D, Convolution2D, ZeroPadding2D, Conv2DTranspose,
@@ -76,7 +79,7 @@ validationGenerator = validationDataGenerator.flow_from_dataframe(
     )
 
 
-# Squeeze and Excitation function
+# Squeeze and Excitation function for encoder
 def se_block_enc(inputs, alpha):
     input_channels = inputs.shape[-1]
     tensor = tf.keras.layers.GlobalAveragePooling2D()(inputs)
@@ -220,9 +223,51 @@ validImages = trainDataGenerator.flow_from_dataframe(
 )
 
 
-import tensorflow_hub as hub
+# function to call a preTrained model
 def get_from_hub(model_url):
     inputs = tf.keras.Input((224, 224, 3))
     hub_module = hub.KerasLayer(model_url,trainable=False)
     outputs = hub_module(inputs)
     return tf.keras.Model(inputs, outputs)
+
+
+# Squeeze and Excitation function
+def se_block(inputs):
+    input_channels = inputs.shape[-1]
+    x = tf.keras.layers.GlobalAveragePooling2D()(inputs)
+    x = tf.keras.layers.Dense(units=len(trainImages.class_indices.keys()), activation="relu")(x)
+    x = tf.keras.layers.Dense(units=input_channels, activation="sigmoid")(x)
+    x = tf.reshape(x, [-1, 1, 1, input_channels])
+    x = inputs * x
+    return x
+
+
+# swin model Address
+swin = get_from_hub('https://tfhub.dev/sayakpaul/swin_large_patch4_window7_224_in22k_fe/1')
+
+# fine tuning swin model transformer
+x = swin.output  # output layer
+x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.99, epsilon=0.001 )(x)  # normalize the weights
+# 32 neurones layer
+x = Dense(32, kernel_regularizer=regularizers.l2(l=0.016), activity_regularizer=regularizers.l1(0.006),
+          bias_regularizer=regularizers.l1(0.006), activation='relu')(x)
+x = Dense(256,activation='relu')(x)
+xSwin = Dense(128, activation='relu')(x)
+
+
+# fine tuning encoder
+def get_model(base_model):
+    x = tf.keras.layers.GlobalAveragePooling2D()(se_block(base_model.output))
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.99, epsilon=0.001)(x)
+    x = Dense(512, kernel_regularizer=regularizers.l2(l = 0.016),activity_regularizer=regularizers.l1(0.006),
+              bias_regularizer=regularizers.l1(0.006), activation='relu')(x)
+    x = Dense(256,activation='relu')(x)
+    return Dense(128,activation='relu')(x)
+
+xEncoder = get_model(encoder)
+
+# final model
+concatenated = concatenate([xEncoder,xSwin])
+bigmodelPrediction = Dense(len(trainImages.class_indices), activation='softmax')(concatenated)
+model = Model([encoder.input,swin.input], bigmodelPrediction)
+
