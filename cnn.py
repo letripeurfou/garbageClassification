@@ -133,6 +133,7 @@ autoencoder = Model(inputImage, decoder(encoded))
 autoencoder.compile(optimizer=tf.keras.optimizers.Adamax(), loss='binary_crossentropy')
 history = autoencoder.fit(trainGenerator, validation_data=validationGenerator, epochs=epoch, verbose=2)
 
+#loss function
 epochs = list(range(len(history.history['loss'])))
 fig, ax = plt.subplots(1, 2)
 
@@ -154,7 +155,7 @@ autoencoder.save("./model/auto_encoder.keras")
 encoder.save('./model/encoder.keras')
 decoder.save('./model/decoder.keras')
 
-# Check performance auto Encoder
+# Check performance auto Encoder with an image
 orig = cv2.imread(test.iloc[0]['path'])
 orig = cv2.cvtColor(orig, cv2.COLOR_BGR2RGB)
 orig = orig * 1.0 / 255.0
@@ -179,9 +180,12 @@ plt.imshow(original_output[0])
 plt.title("reconstructed image")
 plt.show()
 
-######
+# freezing the encoder
+for i in encoder.layers:
+    i.freeze = True
 
 
+# image generator with data augmentation
 trainDataGenerator = ImageDataGenerator(
     rescale=1.0 / 255,
     rotation_range=40,
@@ -215,6 +219,10 @@ validImages = trainDataGenerator.flow_from_dataframe(
     seed=42,
 )
 
-# freezing the encoder
-for i in encoder.layers:
-    i.freeze = True
+
+import tensorflow_hub as hub
+def get_from_hub(model_url):
+    inputs = tf.keras.Input((224, 224, 3))
+    hub_module = hub.KerasLayer(model_url,trainable=False)
+    outputs = hub_module(inputs)
+    return tf.keras.Model(inputs, outputs)
