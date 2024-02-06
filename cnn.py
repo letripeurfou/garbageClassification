@@ -13,6 +13,7 @@ import tensorflow as tf
 from keras.models import Sequential
 from tensorflow.keras import regularizers
 import tensorflow_hub as hub
+from keras.utils import plot_model
 from tensorflow.keras.layers import concatenate
 from tensorflow.keras.layers import (Dense, Dropout, Flatten, Conv2D, MaxPool2D, BatchNormalization, MaxPooling2D,
                                      BatchNormalization, Permute, TimeDistributed, GlobalAveragePooling2D,
@@ -270,4 +271,34 @@ xEncoder = get_model(encoder)
 concatenated = concatenate([xEncoder,xSwin])
 bigmodelPrediction = Dense(len(trainImages.class_indices), activation='softmax')(concatenated)
 model = Model([encoder.input,swin.input], bigmodelPrediction)
+
+plot_model(model)
+
+
+# trainable and non trainable parameters
+trainable_params = sum([v.numpy().size for v in model.trainable_variables])
+non_trainable_params = sum([v.numpy().size for v in model.non_trainable_variables])
+print("trainable parameters: " + str(trainable_params) + " non trainable parameters: " + str(non_trainable_params))
+
+
+def generator_two_img(gen):
+    while True:
+        x1i = gen.next()
+        yield [x1i[0],x1i[0]], x1i[1]
+
+
+# training model
+model.compile(loss="categorical_crossentropy", optimizer=tf.keras.optimizers.experimental.Adamax(), metrics=['accuracy'])
+
+history = model.fit(
+    generator_two_img(trainImages),
+    validation_data=generator_two_img(validImages),
+    validation_steps=validImages.n//batch_size,
+    validation_batch_size=batch_size,
+    steps_per_epoch=trainGenerator.n//batch_size,
+    batch_size=batch_size,
+    epochs=epoch,
+)
+
+model.save('./model/model.h5')
 
